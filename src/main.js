@@ -4,6 +4,7 @@ import {
   ColorType,
   CrosshairMode,
   HistogramSeries,
+  PriceScaleMode,
   createChart,
   createSeriesMarkers,
 } from "lightweight-charts";
@@ -16,6 +17,12 @@ const MARKET_CHART_CACHE_MS = 60_000;
 const MARKET_CHART_PAGE_LIMIT = 1000;
 const MARKET_CHART_MAX_REQUESTS = 180;
 const MINUTE_BUCKET_SECONDS = 60;
+const DEFAULT_CHART_PREFERENCES = {
+  scaleMode: "normal",
+  autoFit: true,
+  showVolume: true,
+  manualZoomPreset: "all",
+};
 
 const state = {
   baseUrl: DEFAULT_BASE_URL,
@@ -37,6 +44,9 @@ const state = {
   seriesMarkers: null,
   marketCharts: new Map(),
   marketChartRequestId: 0,
+  chartPreferences: { ...DEFAULT_CHART_PREFERENCES },
+  chartViewport: null,
+  lastRenderedToken: null,
   priceLines: [],
   refreshTimer: null,
 };
@@ -116,6 +126,33 @@ app.innerHTML = `
         </div>
         <div class="detail-grid" id="detail-grid"></div>
         <div id="chart-note" class="chart-note"></div>
+        <div class="chart-toolbar">
+          <label class="field compact chart-field">
+            <span>Scale</span>
+            <select id="chart-scale-mode">
+              <option value="normal">Linear</option>
+              <option value="logarithmic">Logarithmisch</option>
+              <option value="percentage">Prozent</option>
+              <option value="indexed">Index 100</option>
+            </select>
+          </label>
+          <label class="toggle-chip">
+            <input id="chart-auto-fit" type="checkbox" />
+            <span>Auto Fit</span>
+          </label>
+          <label class="toggle-chip">
+            <input id="chart-show-volume" type="checkbox" />
+            <span>Volume</span>
+          </label>
+          <div class="chart-actions">
+            <button class="button chart-button" type="button" data-chart-action="fit">Fit</button>
+            <button class="button chart-button" type="button" data-zoom-preset="trades">Trades</button>
+            <button class="button chart-button" type="button" data-zoom-preset="1h">1H</button>
+            <button class="button chart-button" type="button" data-zoom-preset="6h">6H</button>
+            <button class="button chart-button" type="button" data-zoom-preset="24h">24H</button>
+            <button class="button chart-button" type="button" data-zoom-preset="all">All</button>
+          </div>
+        </div>
         <div id="chart-container" class="chart-container"></div>
       </section>
     </div>
@@ -188,6 +225,45 @@ function bindEvents() {
     render();
   });
 
+  document.querySelector("#chart-scale-mode").addEventListener("change", (event) => {
+    state.chartPreferences.scaleMode = event.target.value;
+    saveSettings();
+    applyChartPreferences();
+    syncChartControls();
+  });
+
+  document.querySelector("#chart-auto-fit").addEventListener("change", (event) => {
+    state.chartPreferences.autoFit = event.target.checked;
+    saveSettings();
+    applyChartPreferences({ tokenChanged: true, forceFit: event.target.checked });
+    syncChartControls();
+  });
+
+  document.querySelector("#chart-show-volume").addEventListener("change", (event) => {
+    state.chartPreferences.showVolume = event.target.checked;
+    saveSettings();
+    applyChartPreferences();
+    syncChartControls();
+  });
+
+  document.querySelectorAll("[data-chart-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.chartAction === "fit") {
+        applyChartPreferences({ forceFit: true });
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-zoom-preset]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.chartPreferences.autoFit = false;
+      state.chartPreferences.manualZoomPreset = button.dataset.zoomPreset;
+      saveSettings();
+      applyChartPreferences({ forcePreset: button.dataset.zoomPreset });
+      syncChartControls();
+    });
+  });
+
   window.addEventListener("resize", resizeChart);
 }
 
@@ -203,10 +279,15 @@ function loadSettings() {
     state.baseUrl = normalizeBaseUrl(parsed.baseUrl || DEFAULT_BASE_URL);
     state.refreshMs = Number(parsed.refreshMs) || 10_000;
     state.autoRefresh = parsed.autoRefresh !== false;
+    state.chartPreferences = {
+      ...DEFAULT_CHART_PREFERENCES,
+      ...(parsed.chartPreferences ?? {}),
+    };
   } catch {
     state.baseUrl = DEFAULT_BASE_URL;
     state.refreshMs = 10_000;
     state.autoRefresh = true;
+    state.chartPreferences = { ...DEFAULT_CHART_PREFERENCES };
   }
 
   scheduleRefresh();
@@ -219,6 +300,7 @@ function saveSettings() {
       baseUrl: state.baseUrl,
       refreshMs: state.refreshMs,
       autoRefresh: state.autoRefresh,
+      chartPreferences: state.chartPreferences,
     }),
   );
 }
@@ -227,6 +309,20 @@ function syncControls() {
   document.querySelector("#base-url").value = state.baseUrl;
   document.querySelector("#refresh-ms").value = String(state.refreshMs);
   document.querySelector("#auto-refresh").checked = state.autoRefresh;
+  syncChartControls();
+}
+
+function syncChartControls() {
+  document.querySelector("#chart-scale-mode").value = state.chartPreferences.scaleMode;
+  document.querySelector("#chart-auto-fit").checked = state.chartPreferences.autoFit;
+  document.querySelector("#chart-show-volume").checked = state.chartPreferences.showVolume;
+
+  document.querySelectorAll("[data-zoom-preset]").forEach((button) => {
+    const isActive =
+      !state.chartPreferences.autoFit &&
+      button.dataset.zoomPreset === state.chartPreferences.manualZoomPreset;
+    button.classList.toggle("is-active", isActive);
+  });
 }
 
 function scheduleRefresh() {
@@ -359,6 +455,8 @@ function setupChart() {
       bottom: 0,
     },
   });
+
+  applyChartPreferences({ tokenChanged: true, forceFit: true });
 }
 
 function resizeChart() {
@@ -696,6 +794,7 @@ function renderChart(trades, stats) {
     state.candleSeries.setData([]);
     state.seriesMarkers?.setMarkers([]);
     state.volumeSeries.setData([]);
+    state.chartViewport = null;
     return;
   }
 
@@ -715,6 +814,7 @@ function renderChart(trades, stats) {
   state.candleSeries.setData(candles);
   state.seriesMarkers?.setMarkers(markers);
   state.volumeSeries.setData(volume);
+  state.chartViewport = buildChartViewport(candles, trades);
 
   if (!hasMarketChart && stats?.avgBuy) {
     state.priceLines.push(
@@ -742,7 +842,124 @@ function renderChart(trades, stats) {
     );
   }
 
+  const tokenChanged = state.lastRenderedToken !== state.selectedToken;
+  state.lastRenderedToken = state.selectedToken;
+  applyChartPreferences({ tokenChanged });
+}
+
+function applyChartPreferences({ tokenChanged = false, forceFit = false, forcePreset = null } = {}) {
+  if (!state.chart || !state.candleSeries || !state.volumeSeries) {
+    return;
+  }
+
+  state.chart.priceScale("right").applyOptions({
+    mode: getPriceScaleMode(state.chartPreferences.scaleMode),
+  });
+
+  state.volumeSeries.applyOptions({
+    visible: state.chartPreferences.showVolume,
+  });
+
+  if (!state.chartViewport) {
+    return;
+  }
+
+  if (forceFit) {
+    state.chart.timeScale().fitContent();
+    return;
+  }
+
+  if (forcePreset) {
+    applyZoomPreset(forcePreset);
+    return;
+  }
+
+  if (state.chartPreferences.autoFit) {
+    state.chart.timeScale().fitContent();
+    return;
+  }
+
+  if (tokenChanged) {
+    applyZoomPreset(state.chartPreferences.manualZoomPreset);
+  }
+}
+
+function applyZoomPreset(preset) {
+  if (!state.chart || !state.chartViewport) {
+    return;
+  }
+
+  const { candleStart, candleEnd, tradeStart, tradeEnd } = state.chartViewport;
+  const durationByPreset = {
+    "1h": 3600,
+    "6h": 6 * 3600,
+    "24h": 24 * 3600,
+  };
+
+  if (preset === "all") {
+    setVisibleRange(candleStart, candleEnd);
+    return;
+  }
+
+  if (preset === "trades" && tradeStart != null && tradeEnd != null) {
+    const padding = Math.max(MINUTE_BUCKET_SECONDS * 5, Math.round((tradeEnd - tradeStart) * 0.15));
+    setVisibleRange(Math.max(candleStart, tradeStart - padding), Math.min(candleEnd, tradeEnd + padding));
+    return;
+  }
+
+  if (durationByPreset[preset]) {
+    setVisibleRange(Math.max(candleStart, candleEnd - durationByPreset[preset]), candleEnd);
+    return;
+  }
+
   state.chart.timeScale().fitContent();
+}
+
+function setVisibleRange(from, to) {
+  if (!state.chart) {
+    return;
+  }
+
+  if (from == null || to == null) {
+    state.chart.timeScale().fitContent();
+    return;
+  }
+
+  if (from === to) {
+    state.chart.timeScale().setVisibleRange({
+      from: from - MINUTE_BUCKET_SECONDS * 10,
+      to: to + MINUTE_BUCKET_SECONDS * 10,
+    });
+    return;
+  }
+
+  state.chart.timeScale().setVisibleRange({ from, to });
+}
+
+function buildChartViewport(candles, trades) {
+  const candleStart = candles[0]?.time ?? null;
+  const candleEnd = candles[candles.length - 1]?.time ?? null;
+  const tradeTimes = trades.map((trade) => toUnixSeconds(trade.timestamp));
+
+  return {
+    candleStart,
+    candleEnd,
+    tradeStart: tradeTimes.length ? Math.min(...tradeTimes) : null,
+    tradeEnd: tradeTimes.length ? Math.max(...tradeTimes) : null,
+  };
+}
+
+function getPriceScaleMode(mode) {
+  switch (mode) {
+    case "logarithmic":
+      return PriceScaleMode.Logarithmic;
+    case "percentage":
+      return PriceScaleMode.Percentage;
+    case "indexed":
+      return PriceScaleMode.IndexedTo100;
+    default:
+      return PriceScaleMode.Normal;
+  }
 }
 
 async function ensureSelectedTokenMarketChart({ force = false } = {}) {

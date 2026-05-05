@@ -216,6 +216,24 @@ select {
   margin-top: 16px;
 }
 
+.chart-toolbar {
+  margin-top: 14px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.chart-field {
+  min-width: 180px;
+}
+
+.chart-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .meta-chip,
 .error-chip,
 .chart-chip {
@@ -235,6 +253,38 @@ select {
 .error-chip {
   border-color: rgba(255, 100, 125, 0.28);
   background: rgba(255, 100, 125, 0.12);
+}
+
+.toggle-chip {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  min-height: 50px;
+}
+
+.toggle-chip input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.toggle-chip span {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.chart-button {
+  padding: 10px 13px;
+  min-height: 44px;
+}
+
+.chart-button.is-active {
+  border-color: rgba(77, 180, 255, 0.46);
+  background: rgba(77, 180, 255, 0.14);
 }
 
 .summary-grid {
@@ -504,6 +554,10 @@ tbody tr:hover {
 
   .field.compact {
     min-width: 100%;
+  }
+
+  .chart-toolbar {
+    align-items: stretch;
   }
 
   .chart-container {
