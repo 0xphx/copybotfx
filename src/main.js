@@ -49,6 +49,7 @@ const state = {
   lastRenderedToken: null,
   priceLines: [],
   refreshTimer: null,
+  overviewSort: { col: "lastTimestamp", dir: "desc" },
 };
 
 const app = document.querySelector("#app");
@@ -98,6 +99,36 @@ app.innerHTML = `
     </section>
 
     <section class="summary-grid" id="summary-grid"></section>
+
+    <section class="panel overview-panel" id="overview-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Live Overview</p>
+          <h2>Token Flow</h2>
+        </div>
+        <div id="overview-meta" class="small-note"></div>
+      </div>
+      <div class="table-wrap">
+        <table id="overview-table">
+          <thead>
+            <tr>
+              <th data-sort="token">Token</th>
+              <th data-sort="buyCount">Buys</th>
+              <th data-sort="sellCount">Sells</th>
+              <th data-sort="avgBuy">Avg Buy</th>
+              <th data-sort="avgSell">Avg Sell</th>
+              <th data-sort="buyValue">Bought</th>
+              <th data-sort="sellValue">Sold</th>
+              <th data-sort="realizedPnl">PnL</th>
+              <th data-sort="avgPnlPercent">PnL %</th>
+              <th data-sort="openAmount">Open Amt</th>
+              <th data-sort="walletCount">Wallets</th>
+            </tr>
+          </thead>
+          <tbody id="overview-rows"></tbody>
+        </table>
+      </div>
+    </section>
 
     <div class="dashboard-grid">
       <section class="panel token-panel">
@@ -262,6 +293,21 @@ function bindEvents() {
       applyChartPreferences({ forcePreset: button.dataset.zoomPreset });
       syncChartControls();
     });
+  });
+
+  document.querySelector("#overview-table").addEventListener("click", (event) => {
+    const th = event.target.closest("th[data-sort]");
+    if (!th) {
+      return;
+    }
+    const col = th.dataset.sort;
+    if (state.overviewSort.col === col) {
+      state.overviewSort.dir = state.overviewSort.dir === "asc" ? "desc" : "asc";
+    } else {
+      state.overviewSort.col = col;
+      state.overviewSort.dir = "desc";
+    }
+    render();
   });
 
   window.addEventListener("resize", resizeChart);
@@ -474,6 +520,7 @@ function render() {
 
   renderMeta(status, trades);
   renderSummary(summaryStats);
+  renderOverview(tokenStats);
   renderTokenList(tokenStats);
   renderWalletFilter();
   renderDetailCards(selectedStats);
@@ -574,6 +621,67 @@ function renderSummary(summary) {
       `,
     )
     .join("");
+}
+
+function renderOverview(tokenStats) {
+  const meta = document.querySelector("#overview-meta");
+  const rows = document.querySelector("#overview-rows");
+
+  document.querySelectorAll("#overview-table thead th[data-sort]").forEach((th) => {
+    const col = th.dataset.sort;
+    th.classList.toggle("sort-asc", col === state.overviewSort.col && state.overviewSort.dir === "asc");
+    th.classList.toggle("sort-desc", col === state.overviewSort.col && state.overviewSort.dir === "desc");
+  });
+
+  meta.textContent = `${tokenStats.length} token${tokenStats.length === 1 ? "" : "s"}`;
+
+  if (!tokenStats.length) {
+    rows.innerHTML = `<tr><td colspan="11" class="empty-cell">Noch keine Tokens fuer die aktuelle Session gefunden.</td></tr>`;
+    return;
+  }
+
+  const sorted = [...tokenStats].sort((a, b) => {
+    const col = state.overviewSort.col;
+    const valA = a[col] ?? 0;
+    const valB = b[col] ?? 0;
+    const cmp = typeof valA === "string" ? valA.localeCompare(valB) : valA - valB;
+    return state.overviewSort.dir === "asc" ? cmp : -cmp;
+  });
+
+  rows.innerHTML = sorted
+    .map((t) => {
+      const pnlClass = t.realizedPnl > 0 ? "text-profit" : t.realizedPnl < 0 ? "text-loss" : "";
+      const isOpen = t.openAmount > 0.000001;
+      const isSelected = t.token === state.selectedToken;
+      return `
+        <tr class="overview-row${isSelected ? " is-selected" : ""}" data-token="${t.token}">
+          <td class="mono overview-token-cell">
+            ${shortToken(t.token)}${isOpen ? ' <span class="open-badge">LIVE</span>' : ""}
+          </td>
+          <td class="mono text-profit">${t.buyCount}</td>
+          <td class="mono text-loss">${t.sellCount}</td>
+          <td class="mono">${formatPrice(t.avgBuy)}</td>
+          <td class="mono">${formatPrice(t.avgSell)}</td>
+          <td class="mono">${formatCurrency(t.buyValue)}</td>
+          <td class="mono">${formatCurrency(t.sellValue)}</td>
+          <td class="mono ${pnlClass}">${formatCurrency(t.realizedPnl)}</td>
+          <td class="mono ${pnlClass}">${formatPercent(t.avgPnlPercent)}</td>
+          <td class="mono">${formatAmount(t.openAmount)}</td>
+          <td class="mono">${t.walletCount}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  rows.querySelectorAll("[data-token]").forEach((row) => {
+    row.addEventListener("click", () => {
+      state.selectedToken = row.dataset.token;
+      state.selectedWallet = ALL_WALLETS;
+      render();
+      void ensureSelectedTokenMarketChart({ force: false });
+      document.querySelector(".dashboard-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 }
 
 function renderTokenList(tokenStats) {
