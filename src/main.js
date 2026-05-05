@@ -9,12 +9,17 @@ import {
 } from "lightweight-charts";
 
 const DEFAULT_BASE_URL = "http://100.93.6.111:8080";
+const GECKO_TERMINAL_BASE_URL = "https://api.geckoterminal.com/api/v2";
 const STORAGE_KEY = "observer-trade-board:settings";
 const ALL_WALLETS = "__ALL_WALLETS__";
+const MARKET_CHART_CACHE_MS = 60_000;
+const MARKET_CHART_PAGE_LIMIT = 1000;
+const MARKET_CHART_MAX_REQUESTS = 180;
+const MINUTE_BUCKET_SECONDS = 60;
 
 const state = {
   baseUrl: DEFAULT_BASE_URL,
-  refreshMs: 10000,
+  refreshMs: 10_000,
   autoRefresh: true,
   isLoading: false,
   error: "",
@@ -30,6 +35,8 @@ const state = {
   candleSeries: null,
   volumeSeries: null,
   seriesMarkers: null,
+  marketCharts: new Map(),
+  marketChartRequestId: 0,
   priceLines: [],
   refreshTimer: null,
 };
@@ -44,7 +51,7 @@ app.innerHTML = `
         <h1>Buy / Sell Flow im Axiom-Stil</h1>
         <p class="hero-copy">
           Die Seite zieht automatisch Trades, berechnet Average Buy / Sell, realized PnL,
-          offene Positionen und rendert das Ganze als TradingView-Style-Chart.
+          offene Positionen und legt deine Trades auf den kompletten Marktchart des jeweiligen Tokens.
         </p>
       </div>
       <div class="status-cluster">
@@ -89,7 +96,7 @@ app.innerHTML = `
             <p class="eyebrow">Token Explorer</p>
             <h2>Aktive Tokens</h2>
           </div>
-          <div class="small-note">Klick auf einen Token fuer den Detailchart</div>
+          <div class="small-note">Klick auf einen Token fuer den kompletten Chart</div>
         </div>
         <div id="token-list" class="token-list"></div>
       </section>
@@ -108,6 +115,7 @@ app.innerHTML = `
           </div>
         </div>
         <div class="detail-grid" id="detail-grid"></div>
+        <div id="chart-note" class="chart-note"></div>
         <div id="chart-container" class="chart-container"></div>
       </section>
     </div>
@@ -163,10 +171,7 @@ refreshData({ preserveSelection: true });
 function bindEvents() {
   document.querySelector("#config-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const nextBaseUrl = normalizeBaseUrl(
-      document.querySelector("#base-url").value || DEFAULT_BASE_URL,
-    );
-    state.baseUrl = nextBaseUrl;
+    state.baseUrl = normalizeBaseUrl(document.querySelector("#base-url").value || DEFAULT_BASE_URL);
     state.refreshMs = Number(document.querySelector("#refresh-ms").value);
     state.autoRefresh = document.querySelector("#auto-refresh").checked;
     saveSettings();
@@ -196,11 +201,11 @@ function loadSettings() {
   try {
     const parsed = JSON.parse(raw);
     state.baseUrl = normalizeBaseUrl(parsed.baseUrl || DEFAULT_BASE_URL);
-    state.refreshMs = Number(parsed.refreshMs) || 10000;
+    state.refreshMs = Number(parsed.refreshMs) || 10_000;
     state.autoRefresh = parsed.autoRefresh !== false;
   } catch {
     state.baseUrl = DEFAULT_BASE_URL;
-    state.refreshMs = 10000;
+    state.refreshMs = 10_000;
     state.autoRefresh = true;
   }
 
@@ -261,15 +266,15 @@ async function refreshData({ preserveSelection }) {
     };
 
     const tokenStats = buildTokenStats(trades);
-    const availableTokenIds = new Set(tokenStats.map((entry) => entry.token));
+    const tokenIds = new Set(tokenStats.map((entry) => entry.token));
 
-    if (!preserveSelection || !state.selectedToken || !availableTokenIds.has(state.selectedToken)) {
+    if (!preserveSelection || !state.selectedToken || !tokenIds.has(state.selectedToken)) {
       state.selectedToken = tokenStats[0]?.token ?? null;
       state.selectedWallet = ALL_WALLETS;
     }
 
-    const walletsForToken = getWalletOptionsForToken(state.selectedToken);
-    if (!walletsForToken.includes(state.selectedWallet)) {
+    const wallets = getWalletOptionsForToken(state.selectedToken);
+    if (!wallets.includes(state.selectedWallet)) {
       state.selectedWallet = ALL_WALLETS;
     }
 
@@ -280,6 +285,7 @@ async function refreshData({ preserveSelection }) {
     state.isLoading = false;
     render();
     updateStatus();
+    void ensureSelectedTokenMarketChart();
   }
 }
 
@@ -298,8 +304,7 @@ async function fetchJson(url) {
 }
 
 function setupChart() {
-  const container = document.querySelector("#chart-container");
-  state.chart = createChart(container, {
+  state.chart = createChart(document.querySelector("#chart-container"), {
     autoSize: true,
     height: 430,
     layout: {
@@ -337,6 +342,7 @@ function setupChart() {
     priceLineVisible: true,
     lastValueVisible: true,
   });
+
   state.seriesMarkers = createSeriesMarkers(state.candleSeries, []);
 
   state.volumeSeries = state.chart.addSeries(HistogramSeries, {
@@ -356,11 +362,9 @@ function setupChart() {
 }
 
 function resizeChart() {
-  if (!state.chart) {
-    return;
+  if (state.chart) {
+    state.chart.timeScale().fitContent();
   }
-
-  state.chart.timeScale().fitContent();
 }
 
 function render() {
@@ -375,6 +379,7 @@ function render() {
   renderTokenList(tokenStats);
   renderWalletFilter();
   renderDetailCards(selectedStats);
+  renderChartNote();
   renderTradeTable(selectedTrades);
   renderSessions(sessions, status?.session_id);
   renderChart(selectedTrades, selectedStats);
@@ -426,7 +431,6 @@ function renderMeta(status, trades) {
 }
 
 function renderSummary(summary) {
-  const grid = document.querySelector("#summary-grid");
   const cards = [
     {
       label: "Total PnL",
@@ -446,7 +450,7 @@ function renderSummary(summary) {
     },
     {
       label: "Open Positions",
-      value: `${summary.openPositions}`,
+      value: String(summary.openPositions),
       note: `${summary.uniqueTokens} Tokens im Feed`,
     },
     {
@@ -461,7 +465,7 @@ function renderSummary(summary) {
     },
   ];
 
-  grid.innerHTML = cards
+  document.querySelector("#summary-grid").innerHTML = cards
     .map(
       (card) => `
         <article class="stat-card ${card.tone ? `is-${card.tone}` : ""}">
@@ -483,15 +487,12 @@ function renderTokenList(tokenStats) {
   }
 
   list.innerHTML = tokenStats
-    .map((token) => {
-      const isSelected = token.token === state.selectedToken;
-      return `
-        <button class="token-row ${isSelected ? "is-selected" : ""}" data-token="${token.token}">
+    .map(
+      (token) => `
+        <button class="token-row ${token.token === state.selectedToken ? "is-selected" : ""}" data-token="${token.token}">
           <div class="token-row-top">
             <strong>${shortToken(token.token)}</strong>
-            <span class="${token.realizedPnl >= 0 ? "text-profit" : "text-loss"}">${formatCurrency(
-              token.realizedPnl,
-            )}</span>
+            <span class="${token.realizedPnl >= 0 ? "text-profit" : "text-loss"}">${formatCurrency(token.realizedPnl)}</span>
           </div>
           <div class="token-row-bottom">
             <span>${token.tradeCount} Trades</span>
@@ -499,8 +500,8 @@ function renderTokenList(tokenStats) {
             <span>Avg Buy ${formatPrice(token.avgBuy)}</span>
           </div>
         </button>
-      `;
-    })
+      `,
+    )
     .join("");
 
   list.querySelectorAll("[data-token]").forEach((button) => {
@@ -508,6 +509,7 @@ function renderTokenList(tokenStats) {
       state.selectedToken = button.dataset.token;
       state.selectedWallet = ALL_WALLETS;
       render();
+      void ensureSelectedTokenMarketChart({ force: false });
     });
   });
 }
@@ -515,6 +517,7 @@ function renderTokenList(tokenStats) {
 function renderWalletFilter() {
   const select = document.querySelector("#wallet-filter");
   const wallets = getWalletOptionsForToken(state.selectedToken);
+
   select.innerHTML = wallets
     .map((wallet) => {
       const label = wallet === ALL_WALLETS ? "Alle Wallets" : shortAddress(wallet);
@@ -584,11 +587,41 @@ function renderDetailCards(stats) {
     .join("");
 }
 
+function renderChartNote() {
+  const marketChart = getCurrentMarketChartEntry();
+  const note = document.querySelector("#chart-note");
+
+  if (!state.selectedToken) {
+    note.innerHTML = "";
+    return;
+  }
+
+  if (!marketChart || marketChart.status === "loading") {
+    note.innerHTML = `
+      <span class="chart-chip is-loading">Lade kompletten Marktchart fuer dieses Token...</span>
+    `;
+    return;
+  }
+
+  if (marketChart.status === "ready") {
+    note.innerHTML = `
+      <span class="chart-chip">Full 1m chart via GeckoTerminal</span>
+      <span class="chart-chip">${marketChart.timeframeLabel}</span>
+      <span class="chart-chip">${marketChart.poolName}</span>
+      <span class="chart-chip">Marktpreis in USD</span>
+      <span class="chart-chip">${marketChart.isComplete ? "Pool-Start bis jetzt" : "Nahezu kompletter Verlauf"}</span>
+    `;
+    return;
+  }
+
+  note.innerHTML = `
+    <span class="chart-chip is-warning">Kein externer Full-Chart gefunden, Fallback auf Observer-Trades.</span>
+  `;
+}
+
 function renderTradeTable(trades) {
   const rows = document.querySelector("#trade-rows");
-  const label = document.querySelector("#trade-count-label");
-
-  label.textContent = `${trades.length} Eintraege`;
+  document.querySelector("#trade-count-label").textContent = `${trades.length} Eintraege`;
 
   if (!trades.length) {
     rows.innerHTML = `
@@ -611,9 +644,7 @@ function renderTradeTable(trades) {
           <td>${formatPrice(trade.price_eur)}</td>
           <td>${formatAmount(trade.amount)}</td>
           <td>${formatCurrency(trade.value_eur)}</td>
-          <td class="${Number(trade.pnl_eur || 0) >= 0 ? "text-profit" : "text-loss"}">${formatNullableCurrency(
-            trade.pnl_eur,
-          )}</td>
+          <td class="${Number(trade.pnl_eur || 0) >= 0 ? "text-profit" : "text-loss"}">${formatNullableCurrency(trade.pnl_eur)}</td>
           <td>${trade.reason ?? "--"}</td>
         </tr>
       `,
@@ -653,20 +684,28 @@ function renderChart(trades, stats) {
     return;
   }
 
+  const marketChart = getCurrentMarketChartEntry();
+  const hasMarketChart = marketChart?.status === "ready" && marketChart.candles.length > 0;
+  const candles = hasMarketChart ? marketChart.candles : buildCandles(trades);
+  const volume = hasMarketChart ? marketChart.volume : buildVolumeSeries(trades);
+
   state.priceLines.forEach((line) => state.candleSeries.removePriceLine(line));
   state.priceLines = [];
 
-  if (!trades.length) {
+  if (!candles.length) {
     state.candleSeries.setData([]);
     state.seriesMarkers?.setMarkers([]);
     state.volumeSeries.setData([]);
     return;
   }
 
-  const candles = buildCandles(trades);
-  const volume = buildVolumeSeries(trades);
+  const candleTimes = candles.map((candle) => candle.time);
+  const bucketSeconds = hasMarketChart ? marketChart.bucketSeconds : 60;
   const markers = trades.map((trade) => ({
-    time: toUnixSeconds(trade.timestamp),
+    time: findNearestCandleTime(
+      floorToBucket(toUnixSeconds(trade.timestamp), bucketSeconds),
+      candleTimes,
+    ),
     position: trade.side === "BUY" ? "belowBar" : "aboveBar",
     color: trade.side === "BUY" ? "#28d391" : "#ff647d",
     shape: trade.side === "BUY" ? "arrowUp" : "arrowDown",
@@ -677,7 +716,7 @@ function renderChart(trades, stats) {
   state.seriesMarkers?.setMarkers(markers);
   state.volumeSeries.setData(volume);
 
-  if (stats.avgBuy) {
+  if (!hasMarketChart && stats?.avgBuy) {
     state.priceLines.push(
       state.candleSeries.createPriceLine({
         price: stats.avgBuy,
@@ -690,7 +729,7 @@ function renderChart(trades, stats) {
     );
   }
 
-  if (stats.avgSell) {
+  if (!hasMarketChart && stats?.avgSell) {
     state.priceLines.push(
       state.candleSeries.createPriceLine({
         price: stats.avgSell,
@@ -704,6 +743,195 @@ function renderChart(trades, stats) {
   }
 
   state.chart.timeScale().fitContent();
+}
+
+async function ensureSelectedTokenMarketChart({ force = false } = {}) {
+  const token = state.selectedToken;
+  if (!token) {
+    return;
+  }
+
+  const cached = state.marketCharts.get(token);
+  const cacheAge = cached?.fetchedAt ? Date.now() - cached.fetchedAt : Number.POSITIVE_INFINITY;
+
+  if (
+    !force &&
+    cached &&
+    cacheAge < MARKET_CHART_CACHE_MS &&
+    (cached.status === "ready" || cached.status === "error" || cached.status === "loading")
+  ) {
+    return;
+  }
+
+  state.marketChartRequestId += 1;
+  const requestId = state.marketChartRequestId;
+
+  state.marketCharts.set(token, {
+    ...(cached ?? {}),
+    status: "loading",
+    fetchedAt: Date.now(),
+  });
+
+  renderChartNote();
+
+  try {
+    const marketChart = await fetchTokenMarketChart(token);
+    state.marketCharts.set(token, {
+      ...marketChart,
+      status: "ready",
+      fetchedAt: Date.now(),
+    });
+  } catch (error) {
+    state.marketCharts.set(token, {
+      status: "error",
+      error: error instanceof Error ? error.message : "Kein Marktchart verfuegbar",
+      fetchedAt: Date.now(),
+    });
+  }
+
+  if (requestId === state.marketChartRequestId && token === state.selectedToken) {
+    render();
+  }
+}
+
+async function fetchTokenMarketChart(token) {
+  const poolsPayload = await fetchJson(
+    `${GECKO_TERMINAL_BASE_URL}/networks/solana/tokens/${encodeURIComponent(token)}/pools?page=1`,
+  );
+
+  const pools = Array.isArray(poolsPayload.data) ? poolsPayload.data : [];
+  if (!pools.length) {
+    throw new Error("Kein GeckoTerminal-Pool gefunden");
+  }
+
+  const pool = [...pools].sort(
+    (left, right) =>
+      Number(right.attributes?.reserve_in_usd || 0) - Number(left.attributes?.reserve_in_usd || 0),
+  )[0];
+
+  const poolAddress = pool.attributes?.address || pool.id?.split("_").at(-1);
+  if (!poolAddress) {
+    throw new Error("Pool-Adresse fehlt");
+  }
+
+  const minuteHistory = await fetchFullMinuteHistory(
+    poolAddress,
+    pool.attributes?.pool_created_at,
+  );
+  if (!minuteHistory.candles.length) {
+    throw new Error("Keine OHLCV-Daten verfuegbar");
+  }
+  return {
+    source: "geckoterminal",
+    timeframeLabel: "1m full history",
+    bucketSeconds: MINUTE_BUCKET_SECONDS,
+    poolName: pool.attributes?.name || `Pool ${shortAddress(poolAddress)}`,
+    isComplete: minuteHistory.isComplete,
+    candles: minuteHistory.candles.map((entry) => ({
+      time: entry.time,
+      open: entry.open,
+      high: entry.high,
+      low: entry.low,
+      close: entry.close,
+    })),
+    volume: minuteHistory.candles.map((entry) => ({
+      time: entry.time,
+      value: entry.volume,
+      color:
+        entry.close >= entry.open
+          ? "rgba(40, 211, 145, 0.55)"
+          : "rgba(255, 100, 125, 0.55)",
+    })),
+  };
+}
+
+function getCurrentMarketChartEntry() {
+  if (!state.selectedToken) {
+    return null;
+  }
+
+  return state.marketCharts.get(state.selectedToken) ?? null;
+}
+
+async function fetchFullMinuteHistory(poolAddress, poolCreatedAt) {
+  const allRows = [];
+  const poolStartTime = poolCreatedAt ? toUnixSeconds(poolCreatedAt) : null;
+  let beforeTimestamp = null;
+  let requestCount = 0;
+  let isComplete = false;
+
+  while (requestCount < MARKET_CHART_MAX_REQUESTS) {
+    const url = new URL(
+      `${GECKO_TERMINAL_BASE_URL}/networks/solana/pools/${poolAddress}/ohlcv/minute`,
+    );
+    url.searchParams.set("aggregate", "1");
+    url.searchParams.set("limit", String(MARKET_CHART_PAGE_LIMIT));
+
+    if (beforeTimestamp != null) {
+      url.searchParams.set("before_timestamp", String(beforeTimestamp));
+    }
+
+    const payload = await fetchJson(url.toString());
+    const rows = payload?.data?.attributes?.ohlcv_list;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      isComplete = true;
+      break;
+    }
+
+    allRows.push(...rows);
+    requestCount += 1;
+
+    const normalizedPage = normalizeOhlcvList(rows);
+    const oldestTime = normalizedPage[0]?.time ?? null;
+
+    if (oldestTime == null) {
+      isComplete = true;
+      break;
+    }
+
+    if (rows.length < MARKET_CHART_PAGE_LIMIT) {
+      isComplete = true;
+      break;
+    }
+
+    if (poolStartTime != null && oldestTime <= poolStartTime + MINUTE_BUCKET_SECONDS) {
+      isComplete = true;
+      break;
+    }
+
+    if (beforeTimestamp != null && oldestTime >= beforeTimestamp) {
+      break;
+    }
+
+    beforeTimestamp = oldestTime;
+  }
+
+  return {
+    candles: normalizeOhlcvList(allRows),
+    isComplete,
+  };
+}
+
+function normalizeOhlcvList(ohlcvList) {
+  const ordered = [...ohlcvList].reverse();
+  const merged = new Map();
+
+  for (const row of ordered) {
+    const [time, open, high, low, close, volume] = row.map(Number);
+    if (!merged.has(time)) {
+      merged.set(time, { time, open, high, low, close, volume });
+      continue;
+    }
+
+    const current = merged.get(time);
+    current.high = Math.max(current.high, high);
+    current.low = Math.min(current.low, low);
+    current.close = close;
+    current.volume += volume;
+  }
+
+  return Array.from(merged.values()).sort((left, right) => left.time - right.time);
 }
 
 function getSelectedTrades() {
@@ -847,6 +1075,7 @@ function accumulateTrade(entry, trade) {
 function finalizeStats(token, entry) {
   const avgBuy = entry.buyAmount > 0 ? entry.buyValue / entry.buyAmount : null;
   const avgSell = entry.sellAmount > 0 ? entry.sellValue / entry.sellAmount : null;
+
   return {
     token,
     tradeCount: entry.tradeCount,
@@ -872,7 +1101,7 @@ function buildCandles(trades) {
   const buckets = new Map();
 
   for (const trade of trades) {
-    const time = Math.floor(toUnixSeconds(trade.timestamp) / 60) * 60;
+    const time = floorToBucket(toUnixSeconds(trade.timestamp), 60);
     const price = Number(trade.price_eur || 0);
 
     if (!buckets.has(time)) {
@@ -892,14 +1121,14 @@ function buildCandles(trades) {
     bucket.close = price;
   }
 
-  return Array.from(buckets.values());
+  return Array.from(buckets.values()).sort((left, right) => left.time - right.time);
 }
 
 function buildVolumeSeries(trades) {
   const buckets = new Map();
 
   for (const trade of trades) {
-    const time = Math.floor(toUnixSeconds(trade.timestamp) / 60) * 60;
+    const time = floorToBucket(toUnixSeconds(trade.timestamp), 60);
     const value = Number(trade.value_eur || 0);
     const color = trade.side === "BUY" ? "rgba(40, 211, 145, 0.55)" : "rgba(255, 100, 125, 0.55)";
     const current = buckets.get(time) ?? { time, value: 0, color };
@@ -908,7 +1137,7 @@ function buildVolumeSeries(trades) {
     buckets.set(time, current);
   }
 
-  return Array.from(buckets.values());
+  return Array.from(buckets.values()).sort((left, right) => left.time - right.time);
 }
 
 function normalizeBaseUrl(value) {
@@ -920,6 +1149,46 @@ function normalizeBaseUrl(value) {
   normalized = normalized.replace(/\/+$/, "");
   normalized = normalized.replace(/\/(status|trades|sessions|hourly)$/i, "");
   return normalized;
+}
+
+function floorToBucket(timestamp, bucketSeconds) {
+  return Math.floor(timestamp / bucketSeconds) * bucketSeconds;
+}
+
+function findNearestCandleTime(targetTime, candleTimes) {
+  if (!candleTimes.length) {
+    return targetTime;
+  }
+
+  if (targetTime <= candleTimes[0]) {
+    return candleTimes[0];
+  }
+
+  if (targetTime >= candleTimes[candleTimes.length - 1]) {
+    return candleTimes[candleTimes.length - 1];
+  }
+
+  let left = 0;
+  let right = candleTimes.length - 1;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const value = candleTimes[mid];
+
+    if (value === targetTime) {
+      return value;
+    }
+
+    if (value < targetTime) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+
+  const lower = candleTimes[Math.max(0, right)];
+  const upper = candleTimes[Math.min(candleTimes.length - 1, left)];
+  return Math.abs(targetTime - lower) <= Math.abs(upper - targetTime) ? lower : upper;
 }
 
 function shortToken(token) {
@@ -960,6 +1229,7 @@ function formatPercent(value) {
 
 function formatAmount(value) {
   const amount = Number(value || 0);
+
   if (Math.abs(amount) >= 1_000_000) {
     return amount.toLocaleString("de-DE", { maximumFractionDigits: 0 });
   }
@@ -977,22 +1247,36 @@ function formatPrice(value) {
     return "0.00 EUR";
   }
 
-  if (Math.abs(price) >= 1) {
-    return `${price.toFixed(4)} EUR`;
+  const absPrice = Math.abs(price);
+
+  if (absPrice >= 1) {
+    return `${trimTrailingZeros(price.toFixed(4))} EUR`;
   }
 
-  if (Math.abs(price) >= 0.01) {
-    return `${price.toFixed(6)} EUR`;
+  if (absPrice >= 0.01) {
+    return `${trimTrailingZeros(price.toFixed(6))} EUR`;
   }
 
-  if (Math.abs(price) >= 0.0001) {
-    return `${price.toFixed(8)} EUR`;
+  if (absPrice >= 0.0001) {
+    return `${trimTrailingZeros(price.toFixed(8))} EUR`;
   }
 
-  return `${price.toExponential(3)} EUR`;
+  if (absPrice >= 0.000001) {
+    return `${trimTrailingZeros(price.toFixed(10))} EUR`;
+  }
+
+  return `${trimTrailingZeros(price.toFixed(14))} EUR`;
+}
+
+function trimTrailingZeros(value) {
+  return value.replace(/(\.\d*?[1-9])0+$/u, "$1").replace(/\.0+$/u, "");
 }
 
 function formatDateTime(value) {
+  if (!value) {
+    return "--";
+  }
+
   const date = new Date(value);
   return date.toLocaleString("de-DE", {
     day: "2-digit",
