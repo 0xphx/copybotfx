@@ -21,6 +21,7 @@ const DEFAULT_CHART_PREFERENCES = {
   scaleMode: "normal",
   autoFit: true,
   showVolume: true,
+  yAxisMode: "price",
   manualZoomPreset: "all",
 };
 
@@ -142,49 +143,44 @@ app.innerHTML = `
         <div id="token-list" class="token-list"></div>
       </section>
 
-      <section class="panel chart-panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Trade Detail</p>
-            <h2 id="chart-title">Kein Token gewaehlt</h2>
+      <section class="panel ax-chart-panel">
+        <div class="ax-chart-header">
+          <div class="ax-chart-title-row">
+            <h2 id="chart-title" class="ax-chart-title">Kein Token gewaehlt</h2>
           </div>
-          <div class="filter-row">
-            <label class="field compact">
-              <span>Wallet</span>
-              <select id="wallet-filter"></select>
-            </label>
+          <select id="wallet-filter" class="ax-select-sm"></select>
+        </div>
+
+        <div id="chart-note" class="ax-chart-note-bar"></div>
+
+        <div id="detail-grid" class="ax-stats-bar"></div>
+
+        <div class="ax-toolbar">
+          <div class="ax-tbar-group">
+            <button class="ax-btn ax-tf" data-zoom-preset="all">All</button>
+            <button class="ax-btn ax-tf" data-zoom-preset="trades">Trades</button>
+            <button class="ax-btn ax-tf" data-zoom-preset="1h">1H</button>
+            <button class="ax-btn ax-tf" data-zoom-preset="6h">6H</button>
+            <button class="ax-btn ax-tf" data-zoom-preset="24h">24H</button>
+          </div>
+          <div class="ax-tbar-sep"></div>
+          <div class="ax-tbar-group">
+            <button class="ax-btn" data-chart-action="fit">Fit</button>
+            <button class="ax-btn" id="ax-auto-fit">Auto</button>
+          </div>
+          <div class="ax-tbar-sep"></div>
+          <div class="ax-tbar-group">
+            <button class="ax-btn" id="ax-scale-log">Log</button>
+            <button class="ax-btn" id="ax-vol">Vol</button>
+          </div>
+          <div class="ax-tbar-sep"></div>
+          <div class="ax-tbar-group ax-yaxis-switch">
+            <button class="ax-btn" id="ax-yaxis-price">Price</button>
+            <button class="ax-btn" id="ax-yaxis-mcap">MCap</button>
           </div>
         </div>
-        <div class="detail-grid" id="detail-grid"></div>
-        <div id="chart-note" class="chart-note"></div>
-        <div class="chart-toolbar">
-          <label class="field compact chart-field">
-            <span>Scale</span>
-            <select id="chart-scale-mode">
-              <option value="normal">Linear</option>
-              <option value="logarithmic">Logarithmisch</option>
-              <option value="percentage">Prozent</option>
-              <option value="indexed">Index 100</option>
-            </select>
-          </label>
-          <label class="toggle-chip">
-            <input id="chart-auto-fit" type="checkbox" />
-            <span>Auto Fit</span>
-          </label>
-          <label class="toggle-chip">
-            <input id="chart-show-volume" type="checkbox" />
-            <span>Volume</span>
-          </label>
-          <div class="chart-actions">
-            <button class="button chart-button" type="button" data-chart-action="fit">Fit</button>
-            <button class="button chart-button" type="button" data-zoom-preset="trades">Trades</button>
-            <button class="button chart-button" type="button" data-zoom-preset="1h">1H</button>
-            <button class="button chart-button" type="button" data-zoom-preset="6h">6H</button>
-            <button class="button chart-button" type="button" data-zoom-preset="24h">24H</button>
-            <button class="button chart-button" type="button" data-zoom-preset="all">All</button>
-          </div>
-        </div>
-        <div id="chart-container" class="chart-container"></div>
+
+        <div id="chart-container" class="ax-chart-container"></div>
       </section>
     </div>
 
@@ -256,24 +252,39 @@ function bindEvents() {
     render();
   });
 
-  document.querySelector("#chart-scale-mode").addEventListener("change", (event) => {
-    state.chartPreferences.scaleMode = event.target.value;
+  document.querySelector("#ax-scale-log").addEventListener("click", () => {
+    const isLog = state.chartPreferences.scaleMode === "logarithmic";
+    state.chartPreferences.scaleMode = isLog ? "normal" : "logarithmic";
     saveSettings();
     applyChartPreferences();
     syncChartControls();
   });
 
-  document.querySelector("#chart-auto-fit").addEventListener("change", (event) => {
-    state.chartPreferences.autoFit = event.target.checked;
+  document.querySelector("#ax-auto-fit").addEventListener("click", () => {
+    state.chartPreferences.autoFit = !state.chartPreferences.autoFit;
     saveSettings();
-    applyChartPreferences({ tokenChanged: true, forceFit: event.target.checked });
+    applyChartPreferences({ tokenChanged: true, forceFit: state.chartPreferences.autoFit });
     syncChartControls();
   });
 
-  document.querySelector("#chart-show-volume").addEventListener("change", (event) => {
-    state.chartPreferences.showVolume = event.target.checked;
+  document.querySelector("#ax-vol").addEventListener("click", () => {
+    state.chartPreferences.showVolume = !state.chartPreferences.showVolume;
     saveSettings();
     applyChartPreferences();
+    syncChartControls();
+  });
+
+  document.querySelector("#ax-yaxis-price").addEventListener("click", () => {
+    state.chartPreferences.yAxisMode = "price";
+    saveSettings();
+    applyYAxisMode();
+    syncChartControls();
+  });
+
+  document.querySelector("#ax-yaxis-mcap").addEventListener("click", () => {
+    state.chartPreferences.yAxisMode = "mcap";
+    saveSettings();
+    applyYAxisMode();
     syncChartControls();
   });
 
@@ -359,9 +370,11 @@ function syncControls() {
 }
 
 function syncChartControls() {
-  document.querySelector("#chart-scale-mode").value = state.chartPreferences.scaleMode;
-  document.querySelector("#chart-auto-fit").checked = state.chartPreferences.autoFit;
-  document.querySelector("#chart-show-volume").checked = state.chartPreferences.showVolume;
+  document.querySelector("#ax-scale-log")?.classList.toggle("is-active", state.chartPreferences.scaleMode === "logarithmic");
+  document.querySelector("#ax-auto-fit")?.classList.toggle("is-active", state.chartPreferences.autoFit);
+  document.querySelector("#ax-vol")?.classList.toggle("is-active", state.chartPreferences.showVolume);
+  document.querySelector("#ax-yaxis-price")?.classList.toggle("is-active", state.chartPreferences.yAxisMode === "price");
+  document.querySelector("#ax-yaxis-mcap")?.classList.toggle("is-active", state.chartPreferences.yAxisMode === "mcap");
 
   document.querySelectorAll("[data-zoom-preset]").forEach((button) => {
     const isActive =
@@ -448,41 +461,65 @@ async function fetchJson(url) {
 function setupChart() {
   state.chart = createChart(document.querySelector("#chart-container"), {
     autoSize: true,
-    height: 430,
+    height: 500,
     layout: {
       background: {
         type: ColorType.Solid,
-        color: "#07111f",
+        color: "#080c12",
       },
-      attributionLogo: true,
-      textColor: "#d9ecff",
-      fontFamily: "Space Grotesk, sans-serif",
+      attributionLogo: false,
+      textColor: "#94a3b8",
+      fontFamily: "IBM Plex Mono, monospace",
+      fontSize: 11,
     },
     grid: {
-      vertLines: { color: "rgba(147, 197, 253, 0.08)" },
-      horzLines: { color: "rgba(147, 197, 253, 0.08)" },
+      vertLines: { color: "rgba(255,255,255,0.04)" },
+      horzLines: { color: "rgba(255,255,255,0.04)" },
     },
     crosshair: {
       mode: CrosshairMode.Normal,
+      vertLine: {
+        color: "rgba(255,255,255,0.25)",
+        labelBackgroundColor: "#1e293b",
+        style: 2,
+        width: 1,
+      },
+      horzLine: {
+        color: "rgba(255,255,255,0.25)",
+        labelBackgroundColor: "#1e293b",
+        style: 2,
+        width: 1,
+      },
     },
     rightPriceScale: {
-      borderColor: "rgba(147, 197, 253, 0.18)",
+      borderColor: "rgba(255,255,255,0.06)",
+      textColor: "#64748b",
+      entireTextOnly: true,
+    },
+    leftPriceScale: {
+      borderColor: "rgba(255,255,255,0.06)",
+      textColor: "#64748b",
+      entireTextOnly: true,
     },
     timeScale: {
-      borderColor: "rgba(147, 197, 253, 0.18)",
+      borderColor: "rgba(255,255,255,0.06)",
       timeVisible: true,
-      secondsVisible: true,
+      secondsVisible: false,
+      textColor: "#64748b",
     },
   });
 
   state.candleSeries = state.chart.addSeries(CandlestickSeries, {
-    upColor: "#28d391",
-    downColor: "#ff647d",
-    wickUpColor: "#28d391",
-    wickDownColor: "#ff647d",
+    upColor: "#22c55e",
+    downColor: "#ef4444",
+    wickUpColor: "#22c55e",
+    wickDownColor: "#ef4444",
     borderVisible: false,
     priceLineVisible: true,
     lastValueVisible: true,
+    priceLineColor: "#94a3b8",
+    priceLineWidth: 1,
+    priceLineStyle: 2,
   });
 
   state.seriesMarkers = createSeriesMarkers(state.candleSeries, []);
@@ -492,7 +529,7 @@ function setupChart() {
       type: "volume",
     },
     priceScaleId: "",
-    color: "rgba(64, 169, 255, 0.45)",
+    color: "rgba(100,116,139,0.4)",
   });
 
   state.volumeSeries.priceScale().applyOptions({
@@ -501,6 +538,8 @@ function setupChart() {
       bottom: 0,
     },
   });
+
+  state.chart.priceScale("left").applyOptions({ visible: false });
 
   applyChartPreferences({ tokenChanged: true, forceFit: true });
 }
@@ -744,50 +783,56 @@ function renderDetailCards(stats) {
     return;
   }
 
-  title.textContent = `${shortToken(state.selectedToken)} ${state.selectedWallet === ALL_WALLETS ? "" : `| ${shortAddress(state.selectedWallet)}`}`;
+  const wallet = state.selectedWallet === ALL_WALLETS ? "" : ` · ${shortAddress(state.selectedWallet)}`;
+  title.textContent = `${shortToken(state.selectedToken)}${wallet}`;
 
-  const cards = [
+  const items = [
     {
-      label: "Average Buy",
+      label: "Avg Entry",
       value: formatPrice(stats.avgBuy),
-      note: `${stats.buyCount} Buys`,
+      sub: `${stats.buyCount} Buys`,
+      cls: "text-profit",
     },
     {
-      label: "Average Sell",
+      label: "Avg Exit",
       value: formatPrice(stats.avgSell),
-      note: `${stats.sellCount} Sells`,
+      sub: `${stats.sellCount} Sells`,
+      cls: "text-loss",
     },
     {
       label: "Realized PnL",
       value: formatCurrency(stats.realizedPnl),
-      note: `Avg Exit ${formatPercent(stats.avgPnlPercent)}`,
-      tone: stats.realizedPnl >= 0 ? "profit" : "loss",
+      sub: formatPercent(stats.avgPnlPercent),
+      cls: stats.realizedPnl >= 0 ? "text-profit" : "text-loss",
     },
     {
-      label: "Open Amount",
+      label: "Open",
       value: formatAmount(stats.openAmount),
-      note: `Position Value ${formatCurrency(stats.openValueEstimate)}`,
+      sub: formatCurrency(stats.openValueEstimate),
+      cls: stats.openAmount > 0 ? "text-profit" : "",
     },
     {
-      label: "Invested / Returned",
-      value: `${formatCurrency(stats.buyValue)} / ${formatCurrency(stats.sellValue)}`,
-      note: `${stats.walletCount} Wallets`,
+      label: "Invested",
+      value: formatCurrency(stats.buyValue),
+      sub: `${stats.walletCount} Wallets`,
+      cls: "",
     },
     {
-      label: "Preisrange",
-      value: `${formatPrice(stats.minPrice)} to ${formatPrice(stats.maxPrice)}`,
-      note: `Last ${formatPrice(stats.lastPrice)}`,
+      label: "Returned",
+      value: formatCurrency(stats.sellValue),
+      sub: null,
+      cls: "",
     },
   ];
 
-  grid.innerHTML = cards
+  grid.innerHTML = items
     .map(
-      (card) => `
-        <article class="detail-card ${card.tone ? `is-${card.tone}` : ""}">
-          <span>${card.label}</span>
-          <strong>${card.value}</strong>
-          <small>${card.note}</small>
-        </article>
+      (item) => `
+        <div class="ax-stat">
+          <span class="ax-stat-lbl">${item.label}</span>
+          <strong class="ax-stat-val ${item.cls}">${item.value}</strong>
+          ${item.sub ? `<span class="ax-stat-sub">${item.sub}</span>` : ""}
+        </div>
       `,
     )
     .join("");
@@ -908,51 +953,103 @@ function renderChart(trades, stats) {
 
   const candleTimes = candles.map((candle) => candle.time);
   const bucketSeconds = hasMarketChart ? marketChart.bucketSeconds : 60;
-  const markers = trades.map((trade) => ({
-    time: findNearestCandleTime(
-      floorToBucket(toUnixSeconds(trade.timestamp), bucketSeconds),
-      candleTimes,
-    ),
-    position: trade.side === "BUY" ? "belowBar" : "aboveBar",
-    color: trade.side === "BUY" ? "#28d391" : "#ff647d",
-    shape: trade.side === "BUY" ? "arrowUp" : "arrowDown",
-    text: `${trade.side} ${formatPrice(trade.price_eur)}`,
-  }));
+  const eurUsdRatio = hasMarketChart ? estimateEurUsdRatio(trades, candles) : 1;
+
+  const maxTradeValue = trades.reduce((m, t) => Math.max(m, Number(t.value_eur || 0)), 0) || 1;
+  const markers = trades.map((trade) => {
+    const isBuy = trade.side === "BUY";
+    const value = Number(trade.value_eur || 0);
+    const size = Math.max(1, Math.min(3, 1 + (value / maxTradeValue) * 2));
+    const pnlSuffix =
+      !isBuy && trade.pnl_percent != null
+        ? ` ${Number(trade.pnl_percent) >= 0 ? "+" : ""}${Number(trade.pnl_percent).toFixed(0)}%`
+        : "";
+    return {
+      time: findNearestCandleTime(
+        floorToBucket(toUnixSeconds(trade.timestamp), bucketSeconds),
+        candleTimes,
+      ),
+      position: isBuy ? "belowBar" : "aboveBar",
+      color: isBuy ? "#22c55e" : "#ef4444",
+      shape: "circle",
+      size,
+      text: `${isBuy ? "B" : "S"} ${formatShortEur(value)}${pnlSuffix}`,
+    };
+  });
 
   state.candleSeries.setData(candles);
   state.seriesMarkers?.setMarkers(markers);
   state.volumeSeries.setData(volume);
   state.chartViewport = buildChartViewport(candles, trades);
 
-  if (!hasMarketChart && stats?.avgBuy) {
+  if (stats?.avgBuy) {
     state.priceLines.push(
       state.candleSeries.createPriceLine({
-        price: stats.avgBuy,
-        color: "#28d391",
+        price: stats.avgBuy * eurUsdRatio,
+        color: "#22c55e",
         lineWidth: 1,
         lineStyle: 2,
         axisLabelVisible: true,
-        title: "Avg Buy",
+        title: `Avg Entry  ${formatShortEur(stats.avgBuy)}`,
       }),
     );
   }
 
-  if (!hasMarketChart && stats?.avgSell) {
+  if (stats?.avgSell) {
     state.priceLines.push(
       state.candleSeries.createPriceLine({
-        price: stats.avgSell,
-        color: "#ff647d",
+        price: stats.avgSell * eurUsdRatio,
+        color: "#f97316",
         lineWidth: 1,
         lineStyle: 2,
         axisLabelVisible: true,
-        title: "Avg Sell",
+        title: `Avg Exit  ${formatShortEur(stats.avgSell)}`,
+      }),
+    );
+  }
+
+  if (stats?.openAmount > 0 && stats?.avgBuy) {
+    state.priceLines.push(
+      state.candleSeries.createPriceLine({
+        price: stats.avgBuy * eurUsdRatio,
+        color: "rgba(34,197,94,0.18)",
+        lineWidth: 6,
+        lineStyle: 0,
+        axisLabelVisible: false,
+        title: "",
       }),
     );
   }
 
   const tokenChanged = state.lastRenderedToken !== state.selectedToken;
   state.lastRenderedToken = state.selectedToken;
+  applyYAxisMode();
   applyChartPreferences({ tokenChanged });
+}
+
+function applyYAxisMode() {
+  if (!state.candleSeries) return;
+  const entry = getCurrentMarketChartEntry();
+  const supply = entry?.effectiveSupply ?? null;
+  const isMcap = state.chartPreferences.yAxisMode === "mcap" && supply != null;
+
+  if (isMcap) {
+    state.candleSeries.applyOptions({
+      priceFormat: {
+        type: "custom",
+        formatter: (p) => formatMarketCap(p * supply),
+        minMove: Math.max(1e-10, 1 / supply),
+      },
+    });
+  } else {
+    state.candleSeries.applyOptions({
+      priceFormat: {
+        type: "price",
+        precision: 10,
+        minMove: 1e-10,
+      },
+    });
+  }
 }
 
 function applyChartPreferences({ tokenChanged = false, forceFit = false, forcePreset = null } = {}) {
@@ -1139,6 +1236,12 @@ async function fetchTokenMarketChart(token) {
     throw new Error("Pool-Adresse fehlt");
   }
 
+  const fdvUsd =
+    Number(pool.attributes?.fdv_usd || 0) ||
+    Number(pool.attributes?.market_cap_usd || 0);
+  const basePriceUsd = Number(pool.attributes?.base_token_price_usd || 0);
+  const effectiveSupply = fdvUsd > 0 && basePriceUsd > 0 ? fdvUsd / basePriceUsd : null;
+
   const minuteHistory = await fetchFullMinuteHistory(
     poolAddress,
     pool.attributes?.pool_created_at,
@@ -1152,6 +1255,7 @@ async function fetchTokenMarketChart(token) {
     bucketSeconds: MINUTE_BUCKET_SECONDS,
     poolName: pool.attributes?.name || `Pool ${shortAddress(poolAddress)}`,
     isComplete: minuteHistory.isComplete,
+    effectiveSupply,
     candles: minuteHistory.candles.map((entry) => ({
       time: entry.time,
       open: entry.open,
@@ -1164,8 +1268,8 @@ async function fetchTokenMarketChart(token) {
       value: entry.volume,
       color:
         entry.close >= entry.open
-          ? "rgba(40, 211, 145, 0.55)"
-          : "rgba(255, 100, 125, 0.55)",
+          ? "rgba(34,197,94,0.5)"
+          : "rgba(239,68,68,0.5)",
     })),
   };
 }
@@ -1455,7 +1559,7 @@ function buildVolumeSeries(trades) {
   for (const trade of trades) {
     const time = floorToBucket(toUnixSeconds(trade.timestamp), 60);
     const value = Number(trade.value_eur || 0);
-    const color = trade.side === "BUY" ? "rgba(40, 211, 145, 0.55)" : "rgba(255, 100, 125, 0.55)";
+    const color = trade.side === "BUY" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
     const current = buckets.get(time) ?? { time, value: 0, color };
     current.value += value;
     current.color = color;
@@ -1530,6 +1634,39 @@ function shortAddress(address) {
   }
 
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+function formatShortEur(value) {
+  const v = Math.abs(Number(value || 0));
+  if (v >= 1000) return `€${(v / 1000).toFixed(1)}K`;
+  if (v >= 1) return `€${v.toFixed(0)}`;
+  if (v >= 0.01) return `€${v.toFixed(2)}`;
+  return `€${v.toPrecision(2)}`;
+}
+
+function estimateEurUsdRatio(trades, candles) {
+  if (!candles.length || !trades.length) return 1;
+  const candleByTime = new Map(candles.map((c) => [c.time, c]));
+  const ratios = [];
+  for (const trade of trades) {
+    const time = floorToBucket(toUnixSeconds(trade.timestamp), MINUTE_BUCKET_SECONDS);
+    const candle = candleByTime.get(time);
+    const priceEur = Number(trade.price_eur);
+    if (candle && priceEur > 0) {
+      const r = candle.close / priceEur;
+      if (r > 0 && r < 1e6 && isFinite(r)) ratios.push(r);
+    }
+  }
+  if (!ratios.length) return 1;
+  ratios.sort((a, b) => a - b);
+  return ratios[Math.floor(ratios.length / 2)];
+}
+
+function formatMarketCap(value) {
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+  if (value >= 1e3) return `$${(value / 1e3).toFixed(1)}K`;
+  return `$${value.toFixed(0)}`;
 }
 
 function formatCurrency(value) {

@@ -216,75 +216,241 @@ select {
   margin-top: 16px;
 }
 
-.chart-toolbar {
-  margin-top: 14px;
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: end;
-}
-
-.chart-field {
-  min-width: 180px;
-}
-
-.chart-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .meta-chip,
 .error-chip,
 .chart-chip {
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(157, 196, 255, 0.08);
-  border: 1px solid var(--line);
-  font-size: 0.88rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.75rem;
+  color: #64748b;
 }
 
 .chart-chip.is-loading {
-  border-color: rgba(77, 180, 255, 0.3);
-  background: rgba(77, 180, 255, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
 }
 
 .chart-chip.is-warning,
 .error-chip {
-  border-color: rgba(255, 100, 125, 0.28);
-  background: rgba(255, 100, 125, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.08);
+  color: #f87171;
 }
 
-.toggle-chip {
-  display: inline-flex;
-  gap: 10px;
+/* ── Axiom Pro Chart Panel ───────────────────────────── */
+
+.ax-chart-panel {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #0e1118;
+  border-radius: 16px;
+}
+
+.ax-chart-header {
+  display: flex;
   align-items: center;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
-  min-height: 50px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.toggle-chip input {
-  width: 18px;
-  height: 18px;
+.ax-chart-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ax-chart-title {
   margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.toggle-chip span {
-  color: var(--text);
-  font-size: 0.92rem;
+.ax-chart-note-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 5px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.15);
+  min-height: 0;
 }
 
-.chart-button {
-  padding: 10px 13px;
-  min-height: 44px;
+.ax-chart-note-bar:empty {
+  display: none;
+  padding: 0;
+  border: none;
 }
 
-.chart-button.is-active {
-  border-color: rgba(77, 180, 255, 0.46);
-  background: rgba(77, 180, 255, 0.14);
+.ax-select-sm {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ax-select-sm:focus {
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+/* Stats bar */
+.ax-stats-bar {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ax-stats-bar:empty {
+  display: none;
+}
+
+.ax-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  min-width: 110px;
+  flex-shrink: 0;
+}
+
+.ax-stat-lbl {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #475569;
+}
+
+.ax-stat-val {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  font-family: "IBM Plex Mono", monospace;
+  white-space: nowrap;
+}
+
+.ax-stat-sub {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+/* Toolbar */
+.ax-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.25);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ax-tbar-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.ax-tbar-sep {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 8px;
+  flex-shrink: 0;
+}
+
+.ax-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+  white-space: nowrap;
+  min-height: 26px;
+  font-family: "IBM Plex Mono", monospace;
+  letter-spacing: 0.02em;
+}
+
+.ax-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #cbd5e1;
+}
+
+.ax-btn.is-active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+}
+
+/* indicator toggles: tinted when active */
+#ax-vol.is-active {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+#ax-scale-log.is-active {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+}
+
+#ax-auto-fit.is-active {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+}
+
+/* Y-axis switch (Price | MCap) */
+.ax-yaxis-switch {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 7px;
+  padding: 2px;
+  gap: 0;
+}
+
+.ax-yaxis-switch .ax-btn {
+  border-radius: 5px;
+  min-width: 46px;
+}
+
+.ax-yaxis-switch .ax-btn.is-active {
+  background: rgba(255, 255, 255, 0.13);
+  color: #f1f5f9;
+}
+
+#ax-yaxis-mcap.is-active {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+}
+
+/* Chart container */
+.ax-chart-container {
+  min-height: 500px;
+  background: #080c12;
 }
 
 .summary-grid {
@@ -411,10 +577,11 @@ select {
 
 .chart-container {
   margin-top: 18px;
-  min-height: 430px;
+  min-height: 480px;
   border-radius: 22px;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(147, 197, 253, 0.1);
+  background: #070e1c;
 }
 
 .bottom-grid {
@@ -616,11 +783,11 @@ tbody tr:hover {
     min-width: 100%;
   }
 
-  .chart-toolbar {
-    align-items: stretch;
+  .ax-chart-container {
+    min-height: 360px;
   }
 
-  .chart-container {
-    min-height: 360px;
+  .ax-stats-bar {
+    flex-wrap: nowrap;
   }
 }
