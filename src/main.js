@@ -59,12 +59,7 @@ app.innerHTML = `
   <div class="shell">
     <header class="hero panel">
       <div>
-        <p class="eyebrow">Live Observer Dashboard</p>
-        <h1>Buy / Sell Flow im Axiom-Stil</h1>
-        <p class="hero-copy">
-          Die Seite zieht automatisch Trades, berechnet Average Buy / Sell, realized PnL,
-          offene Positionen und legt deine Trades auf den kompletten Marktchart des jeweiligen Tokens.
-        </p>
+        <h1 class="eyebrow">Observer Dashboard</h1>
       </div>
       <div class="status-cluster">
         <div class="live-pill" id="live-pill">Warte auf Daten</div>
